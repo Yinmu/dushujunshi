@@ -84,14 +84,14 @@ python3 -m http.server 8000   # 然后打开 http://localhost:8000
 | 🧠 逻辑军师 | 把争论拉回事实和责任 |
 | 🛡️ 稳场军师 | 明确边界，同时留出合作空间 |
 
-所有 prompt 都在 [`prompts.js`](prompts.js)：
+所有 prompt 都在 [`prompts.js`](app/prompts.js)：
 
 - `REPLY_SYSTEM_PROMPT`：三位军师的人设和输出格式
 - `RED_LINES`：红线（不拿年龄、地域、性别、外貌做攻击点；不编造对方的事实；讽刺对事不对人）
 - `SIM_PERSONAS` / `SIM_TARGETS`：模拟器的对手人设和练习目标
 - `REVIEW_SYSTEM_PROMPT`：复盘规则
 
-内置示例在 [`examples.js`](examples.js)。
+内置示例在 [`examples.js`](app/examples.js)。
 
 ## 贡献
 
