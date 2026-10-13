@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>毒舌军师 · 忍一时越想越气，退一步越想越亏</title>
+  <meta name="description" content="三位军师替你把话说回去，也替你把后果想明白。纯前端，自带 API key，零后端。">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hero">
+    <h1>毒舌军师</h1>
+    <p class="slogan">忍一时越想越气，退一步越想越亏。</p>
+    <p class="promise">替你把话说回去，也替你把后果想明白。</p>
+  </header>
+
+  <main>
+    <!-- 设置：只存 localStorage，只存这三项 -->
+    <details class="panel settings" id="settings">
+      <summary>⚙️ API 设置（自带 key，<span id="key-status">未填写</span>）</summary>
+      <p class="tip">key 只保存在你这台浏览器的 localStorage，请求直接从浏览器发到你填的接口，不经过任何其他服务器。支持任意 OpenAI 兼容接口（DeepSeek / Kimi / 智谱 / OpenAI 等）。</p>
+      <label class="field">Base URL
+        <input id="cfg-base" type="url" placeholder="https://api.deepseek.com" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">API Key
+        <input id="cfg-key" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">模型名
+        <input id="cfg-model" type="text" placeholder="deepseek-chat" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="row">
+        <button type="button" class="btn primary" id="cfg-save">保存</button>
+        <button type="button" class="btn ghost" id="cfg-clear">清除 key</button>
+      </div>
+    </details>
+
+    <!-- 输入页 -->
+    <section class="view" id="view-input">
+      <form class="panel" id="input-form" autocomplete="off">
+        <label class="label" for="input-text">对方说了什么？</label>
+        <textarea id="input-text" maxlength="300" rows="5" placeholder="把对方的原话贴进来，比如：这个需求你当时也在会上，没反对就等于同意了。"></textarea>
+        <div class="counter"><span id="input-count">0</span>/300</div>
+
+        <div class="label">对方是你的？</div>
+        <div class="chips" id="relation-chips" data-name="relation">
+          <button type="button" class="chip" data-value="领导">领导</button>
+          <button type="button" class="chip" data-value="同事">同事</button>
+          <button type="button" class="chip" data-value="亲戚">亲戚</button>
+          <button type="button" class="chip" data-value="客户">客户</button>
+          <button type="button" class="chip" data-value="伴侣">伴侣</button>
+          <button type="button" class="chip" data-value="朋友">朋友</button>
+          <button type="button" class="chip" data-value="其他">其他</button>
+        </div>
+
+        <div class="label">你想要什么结果？</div>
+        <div class="chips" id="goal-chips" data-name="goal">
+          <button type="button" class="chip" data-value="我只想解气">我只想解气</button>
+          <button type="button" class="chip" data-value="我要真回过去">我要真回过去</button>
+          <button type="button" class="chip" data-value="我想提前练练">我想提前练练</button>
+        </div>
+
+        <p class="error" id="input-error" hidden></p>
+        <button type="submit" class="btn primary big" id="btn-generate">召唤三位军师</button>
+        <button type="button" class="btn ghost big" id="btn-example">没有 key？看看示例</button>
+      </form>
+    </section>
+
+    <!-- 结果页 -->
+    <section class="view" id="view-result" hidden>
+      <div class="notice example-only" hidden>示例模式：以下内容为示例内容，非 AI 生成。</div>
+      <div class="panel quote-box">
+        <div class="quote-meta" id="result-meta"></div>
+        <blockquote id="result-quote"></blockquote>
+      </div>
+      <div id="cards"></div>
+      <div class="panel next-step">
+        <p id="sim-cta-text">说完就完了？对方大概率还会接着怼。</p>
+        <button type="button" class="btn primary big" id="btn-to-sim">去模拟器练几轮</button>
+        <button type="button" class="btn ghost big example-only" id="btn-next-example" hidden>换个示例看看</button>
+        <button type="button" class="btn ghost big" id="btn-restart">换一句再来</button>
+      </div>
+    </section>
+
+    <!-- 模拟器 -->
+    <section class="view" id="view-sim" hidden>
+      <div class="notice example-only" hidden>示例模式：对手台词、你的回复、复盘均为示例内容，非 AI 生成。</div>
+
+      <div class="panel" id="sim-setup">
+        <div class="label">这局你想练什么？</div>
+        <div class="chips stack" id="target-chips" data-name="target"></div>
+        <div class="label">对手是谁？</div>
+        <div class="chips" id="persona-chips" data-name="persona"></div>
+        <p class="tip">最多 5 回合，随时可以结束。演练基于有限描述，不代表真实对方的反应。</p>
+        <p class="error" id="sim-setup-error" hidden></p>
+        <button type="button" class="btn primary big" id="btn-sim-start">开始演练</button>
+      </div>
+
+      <div class="panel" id="sim-play" hidden>
+        <div class="sim-head">
+          <span id="sim-title"></span>
+          <span class="round" id="sim-round"></span>
+        </div>
+        <div class="chat" id="chat"></div>
+        <p class="error" id="sim-error" hidden></p>
+        <div class="composer" id="composer">
+          <textarea id="sim-input" rows="2" maxlength="300" placeholder="你怎么回？"></textarea>
+          <button type="button" class="btn primary" id="btn-sim-send">发送</button>
+        </div>
+        <button type="button" class="btn ghost big" id="btn-sim-end">结束并复盘</button>
+      </div>
+
+      <div class="panel review" id="sim-review" hidden>
+        <h2>复盘 <span class="badge" id="review-badge">AI 生成</span></h2>
+        <div id="review-body"></div>
+        <div class="row">
+          <button type="button" class="btn primary" id="btn-sim-again">再练一局</button>
+          <button type="button" class="btn ghost" id="btn-sim-back">回到首页</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>本站回复、对手台词与复盘均由 AI 生成（示例模式除外），仅供参考与娱乐，发不发、怎么发由你自己判断。</p>
+    <p>使用模型：<span id="footer-model">deepseek-chat</span>（由你在设置中指定，调用你自己的 API key）</p>
+    <p>不保存任何对话内容，刷新即清空。</p>
+    <p>投诉与反馈：<a href="mailto:feedback@cooljev.com">邮件</a> · <a href="https://github.com/Yinmu/dushujunshi/issues" target="_blank" rel="noopener">GitHub Issue</a></p>
+  </footer>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="prompts.js"></script>
+  <script src="examples.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
