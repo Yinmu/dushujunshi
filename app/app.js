@@ -123,10 +123,51 @@
       throw new Error(`${hint}（HTTP ${res.status}${detail ? '：' + detail : ''}）`);
     }
     let data;
-    try { data = await res.json(); } catch (e) { throw new Error('接口返回的不是 JSON，检查 Base URL 是否是 OpenAI 兼容接口。'); }
+    let raw = '';
+    const ct = (res.headers && res.headers.get('content-type')) || '（无）';
+    try { raw = await res.text(); } catch (e) { throw new Error(`接口响应读取失败（HTTP ${res.status}）。请把这段完整报错发给开发者排查。`); }
+    try { data = JSON.parse(raw); } catch (e) {
+      const preview = raw.slice(0, 200).replace(/\s+/g, ' ');
+      throw new Error(`接口返回的不是 JSON（HTTP ${res.status}，Content-Type: ${ct}，body 前200字符：「${preview}」）。请把这段完整报错发给开发者排查。`);
+    }
     const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) throw new Error('模型返回了空内容，再试一次。');
     return content.trim();
+  }
+
+  // ---------- 测试连接：最小请求 + 全诊断输出 ----------
+  async function testConnection() {
+    const out = $('cfg-test-out');
+    out.hidden = false;
+    const base = $('cfg-base').value.trim() || DEFAULTS.baseUrl;
+    const key = $('cfg-key').value.trim();
+    const model = $('cfg-model').value.trim() || DEFAULTS.model;
+    if (!key) { out.value = '还没填 API key，先填上再测。'; return; }
+    const url = base.replace(/\/+$/, '') + '/chat/completions';
+    out.value = '正在测试…';
+    const t0 = Date.now();
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 5 })
+      });
+      const ct = (res.headers && res.headers.get('content-type')) || '（无）';
+      const raw = await res.text();
+      const ms = Date.now() - t0;
+      let parsed;
+      try {
+        const d = JSON.parse(raw);
+        const reply = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
+        const errMsg = d && d.error && d.error.message;
+        parsed = reply ? `模型回复：「${String(reply).slice(0, 100)}」` : (errMsg ? `接口报错：${errMsg}` : 'JSON 能解析，但没有 choices 内容');
+      } catch (e) {
+        parsed = `body 不是 JSON，前200字符：「${raw.slice(0, 200).replace(/\s+/g, ' ')}」`;
+      }
+      out.value = `URL: ${url}\n模型: ${model}\nHTTP: ${res.status}（${ms}ms）\nContent-Type: ${ct}\n${parsed}`;
+    } catch (e) {
+      out.value = `请求没发出去：${e && e.message ? e.message : e}\n（可能是网络问题、Base URL 写错，或接口不允许浏览器直接调用）`;
+    }
   }
 
   function parseJSON(text) {
@@ -530,6 +571,7 @@
 
     $('cfg-save').addEventListener('click', saveConfig);
     $('cfg-clear').addEventListener('click', clearKey);
+    $('cfg-test').addEventListener('click', testConnection);
     // 常用模型：只填输入框，不自动保存
     $('cfg-presets').querySelectorAll('button[data-model]').forEach((btn) => {
       btn.addEventListener('click', () => {
