@@ -103,7 +103,7 @@
       res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key },
-        body: JSON.stringify({ model: cfg.model, messages, max_tokens: 800, temperature: 0.9 })
+        body: JSON.stringify({ model: cfg.model, messages, max_tokens: 800 })
       });
     } catch (e) {
       throw new Error('网络请求失败：检查网络、Base URL 是否写对，或该接口是否允许浏览器直接调用（CORS）。');
