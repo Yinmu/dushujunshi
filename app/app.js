@@ -530,6 +530,13 @@
 
     $('cfg-save').addEventListener('click', saveConfig);
     $('cfg-clear').addEventListener('click', clearKey);
+    // 常用模型：只填输入框，不自动保存
+    $('cfg-presets').querySelectorAll('button[data-model]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        $('cfg-base').value = btn.dataset.base;
+        $('cfg-model').value = btn.dataset.model;
+      });
+    });
     $('input-text').addEventListener('input', updateCount);
     $('input-form').addEventListener('submit', onGenerate);
     $('btn-example').addEventListener('click', () => startExample(0));

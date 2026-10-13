@@ -28,6 +28,15 @@
       <label class="field">模型名
         <input id="cfg-model" type="text" placeholder="deepseek-chat" autocomplete="off" spellcheck="false">
       </label>
+      <div class="field">常用模型（点一下填入，记得按保存）</div>
+      <div class="chips" id="cfg-presets">
+        <button type="button" class="chip" data-base="https://api.deepseek.com" data-model="deepseek-chat">DeepSeek</button>
+        <button type="button" class="chip" data-base="https://api.apimart.ai/v1" data-model="claude-haiku-5-5">APIMart · Claude Haiku 5.5</button>
+        <button type="button" class="chip" data-base="https://api.apimart.ai/v1" data-model="claude-haiku-4-5-20251001">APIMart · Claude Haiku 4.5</button>
+        <button type="button" class="chip" data-base="https://api.apimart.ai/v1" data-model="gpt-5-mini">APIMart · GPT-5 mini</button>
+        <button type="button" class="chip" data-base="https://api.apimart.ai/v1" data-model="gemini-2.5-flash">APIMart · Gemini 2.5 Flash</button>
+      </div>
+      <p class="tip">模型名必须和渠道方的一致，填错会报 404。</p>
       <div class="row">
         <button type="button" class="btn primary" id="cfg-save">保存</button>
         <button type="button" class="btn ghost" id="cfg-clear">清除 key</button>
