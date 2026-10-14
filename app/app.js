@@ -79,6 +79,7 @@
     const base = $('cfg-base').value.trim() || DEFAULTS.baseUrl;
     const key = $('cfg-key').value.trim();
     const model = $('cfg-model').value.trim() || DEFAULTS.model;
+    if (!/^https?:\/\//i.test(base)) { toast('Base URL 要以 https:// 开头，没保存'); return; }
     localStorage.setItem(LS.base, base);
     localStorage.setItem(LS.model, model);
     if (key) localStorage.setItem(LS.key, key);
@@ -93,10 +94,77 @@
     toast('key 已清除');
   }
 
+  // ---------- 诊断：把响应整理成一段可复制给开发者/渠道客服的文字 ----------
+  const BODY_LIMIT = 4000;
+  // 跨域时浏览器只能读到 Access-Control-Expose-Headers 放行的头；apimart 没放行，这些通常是 null，读到就记
+  const ID_HEADERS = ['x-oneapi-request-id', 'x-new-api-request-id', 'x-request-id', 'request-id', 'cf-ray'];
+
+  function checkBaseUrl(base) {
+    if (!/^https?:\/\//i.test(base)) {
+      throw new Error(`Base URL 要以 https:// 开头（现在是「${base}」），否则请求会发到本站自己，而不是模型接口。`);
+    }
+  }
+
+  function requestIds(res, raw) {
+    const ids = [];
+    ID_HEADERS.forEach((h) => { const v = res.headers.get(h); if (v) ids.push(`${h}: ${v}`); });
+    const m = raw.match(/request id:\s*([\w-]+)/i);
+    if (m) ids.push(`body 里的 request id: ${m[1]}`);
+    // 流式/正常响应里没有 request id，但有上游的 completion id，客服也能拿它查
+    const c = raw.match(/"id"\s*:\s*"((?:chatcmpl|msg)[\w-]*)"/);
+    if (c) ids.push(`completion id: ${c[1]}`);
+    return ids.length ? ids.join('；') : '没读到（浏览器拿不到跨域响应头；按 F12 → Network → 点这次 completions 请求 → Response Headers 里找 X-Oneapi-Request-Id）';
+  }
+
+  function guessCause(ct, raw) {
+    const head = raw.trimStart().slice(0, 20).toLowerCase();
+    if (!raw) return '响应 body 是空的';
+    if (/event-stream/i.test(ct) || head.startsWith('data:')) return '接口返回的是流式数据（SSE），不是一次性 JSON';
+    if (head.startsWith('<')) return '接口返回的是网页（HTML），可能是网关错误页或 Base URL 不对';
+    return '';
+  }
+
+  function describeResponse(url, res, raw, ms) {
+    const ct = res.headers.get('content-type') || '（无）';
+    const cause = guessCause(ct, raw);
+    // 按字符（code point）截，避免把 emoji 之类的代理对切成半个乱码
+    const chars = Array.from(raw);
+    const body = chars.length > BODY_LIMIT
+      ? chars.slice(0, BODY_LIMIT).join('') + `\n…（已截断：共 ${chars.length} 字符，只显示前 ${BODY_LIMIT}）`
+      : (raw || '（空）');
+    return [
+      `请求 URL: ${url}`,
+      res.url && res.url !== url ? `实际响应 URL: ${res.url}${res.redirected ? '（发生过重定向）' : ''}` : '',
+      `HTTP: ${res.status}${ms != null ? `（${ms}ms）` : ''}`,
+      `Content-Type: ${ct}`,
+      `请求 ID: ${requestIds(res, raw)}`,
+      `时间: ${new Date().toISOString()}`,
+      cause ? `初步判断: ${cause}` : '',
+      `body:\n${body}`
+    ].filter(Boolean).join('\n');
+  }
+
+  // new-api 网关（apimart 用的就是）只要上游回了 text/event-stream，就无视请求里的「非流式」直接转发 SSE
+  // （relay/compatible_handler.go: info.IsStream = info.IsStream || 上游 Content-Type 是 event-stream）；这里兜底把增量拼成完整文本
+  function contentFromSSE(raw) {
+    let text = '';
+    raw.split(/\r?\n/).forEach((line) => {
+      const m = line.match(/^data:\s*(.*)$/);
+      if (!m || m[1].trim() === '[DONE]') return;
+      try {
+        const c = JSON.parse(m[1]).choices;
+        const part = c && c[0] && ((c[0].delta && c[0].delta.content) || (c[0].message && c[0].message.content));
+        if (part) text += part;
+      } catch (e) { /* 跳过无法解析的行 */ }
+    });
+    return text;
+  }
+
   // ---------- 调用 OpenAI 兼容接口 ----------
   async function callChat(messages) {
     const cfg = getConfig();
     if (!cfg.key) throw new Error('还没填 API key：点上面的「API 设置」填一下，或者先点「看看示例」。');
+    checkBaseUrl(cfg.baseUrl);
     const url = cfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
     let res;
     try {
@@ -108,9 +176,13 @@
     } catch (e) {
       throw new Error('网络请求失败：检查网络、Base URL 是否写对，或该接口是否允许浏览器直接调用（CORS）。');
     }
+    let raw = '';
+    try { raw = await res.text(); } catch (e) {
+      throw new Error(`接口响应读取失败（HTTP ${res.status}：${e && e.message ? e.message : e}）。可能是连接中途断了，再试一次。`);
+    }
     if (!res.ok) {
       let detail = '';
-      try { detail = ((await res.json()).error || {}).message || ''; } catch (e) { /* 忽略 */ }
+      try { detail = (JSON.parse(raw).error || {}).message || ''; } catch (e) { /* 不是 JSON，下面附原文 */ }
       const hints = {
         400: '请求参数有误，检查模型名是否正确',
         401: 'API key 无效或已过期',
@@ -120,15 +192,14 @@
         429: '请求太频繁或额度用完了，稍后再试'
       };
       const hint = hints[res.status] || (res.status >= 500 ? '模型服务暂时出错，稍后再试' : '请求失败');
-      throw new Error(`${hint}（HTTP ${res.status}${detail ? '：' + detail : ''}）`);
+      if (detail) throw new Error(`${hint}（HTTP ${res.status}：${detail}）`);
+      throw new Error(`${hint}（HTTP ${res.status}）。接口没返回标准错误信息，下面是原始响应：\n\n${describeResponse(url, res, raw)}`);
     }
     let data;
-    let raw = '';
-    const ct = (res.headers && res.headers.get('content-type')) || '（无）';
-    try { raw = await res.text(); } catch (e) { throw new Error(`接口响应读取失败（HTTP ${res.status}）。请把这段完整报错发给开发者排查。`); }
     try { data = JSON.parse(raw); } catch (e) {
-      const preview = raw.slice(0, 200).replace(/\s+/g, ' ');
-      throw new Error(`接口返回的不是 JSON（HTTP ${res.status}，Content-Type: ${ct}，body 前200字符：「${preview}」）。请把这段完整报错发给开发者排查。`);
+      const sse = contentFromSSE(raw);
+      if (sse.trim()) return sse.trim();
+      throw new Error(`接口返回的不是 JSON。请把下面整段复制发给开发者排查：\n\n${describeResponse(url, res, raw)}`);
     }
     const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) throw new Error('模型返回了空内容，再试一次。');
@@ -143,31 +214,46 @@
     const key = $('cfg-key').value.trim();
     const model = $('cfg-model').value.trim() || DEFAULTS.model;
     if (!key) { out.value = '还没填 API key，先填上再测。'; return; }
+    try { checkBaseUrl(base); } catch (e) { out.value = e.message; return; }
     const url = base.replace(/\/+$/, '') + '/chat/completions';
+    const saved = getConfig();
+    const unsaved = saved.baseUrl !== base || saved.model !== model || saved.key !== key;
+    const header = [
+      `模型: ${model}`,
+      `浏览器: ${navigator.userAgent}`,
+      unsaved ? '⚠ 输入框里的设置还没点「保存」，正式生成用的是已保存的旧设置' : ''
+    ].filter(Boolean).join('\n');
     out.value = '正在测试…';
     const t0 = Date.now();
+    let res;
     try {
-      const res = await fetch(url, {
+      res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
         body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 5 })
       });
-      const ct = (res.headers && res.headers.get('content-type')) || '（无）';
-      const raw = await res.text();
-      const ms = Date.now() - t0;
-      let parsed;
-      try {
-        const d = JSON.parse(raw);
-        const reply = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
-        const errMsg = d && d.error && d.error.message;
-        parsed = reply ? `模型回复：「${String(reply).slice(0, 100)}」` : (errMsg ? `接口报错：${errMsg}` : 'JSON 能解析，但没有 choices 内容');
-      } catch (e) {
-        parsed = `body 不是 JSON，前200字符：「${raw.slice(0, 200).replace(/\s+/g, ' ')}」`;
-      }
-      out.value = `URL: ${url}\n模型: ${model}\nHTTP: ${res.status}（${ms}ms）\nContent-Type: ${ct}\n${parsed}`;
     } catch (e) {
-      out.value = `请求没发出去：${e && e.message ? e.message : e}\n（可能是网络问题、Base URL 写错，或接口不允许浏览器直接调用）`;
+      out.value = `${header}\n请求 URL: ${url}\n请求没发出去（${Date.now() - t0}ms）：${e && e.message ? e.message : e}\n`
+        + '（这不是「返回的不是 JSON」：是网络不通、Base URL 写错、被代理/插件拦截，或接口不允许浏览器直接调用 CORS）';
+      return;
     }
+    let raw = '';
+    try { raw = await res.text(); } catch (e) {
+      out.value = `${header}\n请求 URL: ${url}\nHTTP: ${res.status}\n响应读到一半失败：${e && e.message ? e.message : e}`;
+      return;
+    }
+    const ms = Date.now() - t0;
+    let verdict;
+    try {
+      const d = JSON.parse(raw);
+      const reply = d && d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content;
+      const errMsg = d && d.error && d.error.message;
+      verdict = reply ? `✅ 连通，模型回复：「${String(reply).slice(0, 100)}」` : (errMsg ? `❌ 接口报错：${errMsg}` : '⚠ JSON 能解析，但没有 choices 内容');
+    } catch (e) {
+      const sse = contentFromSSE(raw);
+      verdict = sse ? `⚠ 接口无视非流式请求、返回了流式数据，已兜底拼出回复：「${sse.slice(0, 100)}」` : '❌ body 不是 JSON';
+    }
+    out.value = `${verdict}\n${header}\n${describeResponse(url, res, raw, ms)}`;
   }
 
   function parseJSON(text) {
@@ -571,7 +657,11 @@
 
     $('cfg-save').addEventListener('click', saveConfig);
     $('cfg-clear').addEventListener('click', clearKey);
-    $('cfg-test').addEventListener('click', testConnection);
+    $('cfg-test').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true; // 防连点：两次结果交错覆盖
+      try { await testConnection(); } finally { btn.disabled = false; }
+    });
     // 常用模型：只填输入框，不自动保存
     $('cfg-presets').querySelectorAll('button[data-model]').forEach((btn) => {
       btn.addEventListener('click', () => {

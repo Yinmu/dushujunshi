@@ -148,5 +148,6 @@ blockquote { margin: 6px 0 0; padding-left: 12px; border-left: 4px solid var(--l
 .toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); background: rgba(31, 29, 26, .92); color: #fff; padding: 10px 18px; border-radius: 999px; font-size: 14px; z-index: 10; }
 
 .test-out { width: 100%; margin-top: 8px; font-family: ui-monospace, monospace; font-size: 12px; }
+.error { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow-y: auto; }
 
 [hidden] { display: none !important; }

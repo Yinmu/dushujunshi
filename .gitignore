@@ -3,3 +3,8 @@
 ANALYSIS-FROM-USER-2026-10-13.md
 CC-EVALUATION-2026-10-13.md
 PLAN.md
+# BYOK 项目：防止测试用的 key 文件被误提交
+.env
+.env.*
+node_modules/
+.DS_Store
